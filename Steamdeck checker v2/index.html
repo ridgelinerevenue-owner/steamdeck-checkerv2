@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Steam Deck Stock Checker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0e1a2b; color: #c7d5e0; font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; padding: 24px 16px; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+  h1 { font-size: 22px; font-weight: 700; color: #fff; }
+  .subtitle { font-size: 13px; color: #8fa3b3; margin-top: 2px; }
+  .badge-stock { background: #4caf50; color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 700; margin-left: auto; animation: pulse 1.5s infinite; display: none; }
+  .controls { background: #162233; border-radius: 12px; padding: 16px 20px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn { padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; font-size: 15px; }
+  .btn-start { background: #1b9ad5; color: #fff; }
+  .btn-stop  { background: #c0392b; color: #fff; }
+  .btn-once  { padding: 10px 18px; border-radius: 8px; border: 1px solid #2a4a6a; background: transparent; color: #8fa3b3; cursor: pointer; font-size: 14px; }
+  .btn:disabled, .btn-once:disabled { opacity: 0.4; cursor: default; }
+  .countdown-wrap { margin-left: auto; text-align: right; }
+  .countdown-label { font-size: 12px; color: #8fa3b3; }
+  .countdown { font-size: 22px; font-weight: 700; color: #1b9ad5; font-variant-numeric: tabular-nums; }
+  .statusbar { font-size: 12px; color: #6a8fa3; background: #0f1e30; border-radius: 8px; padding: 7px 14px; margin-bottom: 18px; min-height: 30px; }
+  .statusbar.err { color: #e67e22; }
+  .statusbar.ok  { color: #4caf50; }
+
+  /* Section headers */
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #8fa3b3; margin-bottom: 10px; padding-left: 2px; display: flex; align-items: center; gap: 8px; }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: #1e3348; }
+  .section { margin-bottom: 20px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { background: #162233; border: 1.5px solid #2a4a6a; border-radius: 12px; padding: 14px 16px; transition: border-color 0.4s, background 0.4s; }
+  .card.in-stock  { background: #0d2a1a; border-color: #4caf50; }
+  .card.out-stock { background: #1a1215; border-color: #c0392b; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .card-left { min-width: 0; }
+  .tags { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 5px; }
+  .tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; letter-spacing: 0.4px; display: inline-block; }
+  .tag.oled   { background: #1b3a6b; color: #7eb8f7; }
+  .tag.lcd    { background: #2a2a3a; color: #9fa3c0; }
+  .tag.refurb { background: #2a3a1b; color: #8fc97e; }
+  .tag.new    { background: #1b2a3a; color: #7eb8f7; }
+  .card-storage { font-size: 15px; font-weight: 700; color: #fff; }
+  .card-status { font-size: 14px; font-weight: 800; text-align: right; white-space: nowrap; flex-shrink: 0; }
+  .status-in  { color: #4caf50; }
+  .status-out { color: #e74c3c; }
+  .status-unk { color: #8fa3b3; font-size: 12px; font-weight: 400; }
+  .status-err { color: #e67e22; font-size: 12px; font-weight: 600; }
+  .card-price { font-size: 11px; color: #7eb8f7; margin-top: 2px; }
+  .card-time { font-size: 10px; color: #6a7f8a; margin-top: 8px; }
+
+  .alerts-box { background: #162233; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+  .alerts-title { font-size: 13px; font-weight: 700; color: #8fa3b3; margin-bottom: 10px; letter-spacing: 0.5px; }
+  .alert-empty { font-size: 13px; color: #4a6070; font-style: italic; }
+  .alert-row { padding: 8px 0; border-bottom: 1px solid #1e3348; font-size: 13px; color: #4caf50; display: flex; justify-content: space-between; gap: 8px; }
+  .alert-time { color: #6a7f8a; font-size: 11px; white-space: nowrap; }
+  .footer { font-size: 12px; color: #4a6070; text-align: center; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  @media(max-width:500px){ .grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>🎮 Steam Deck Stock Checker</h1>
+      <p class="subtitle">New + Refurbished · Checks every 5 minutes</p>
+    </div>
+    <div class="badge-stock" id="globalBadge">IN STOCK!</div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-start" id="startStopBtn" onclick="toggleRunning()">▶ Start Checking</button>
+    <button class="btn-once" id="checkOnceBtn" onclick="checkAll()">Check Once</button>
+    <div class="countdown-wrap" id="countdownWrap" style="display:none">
+      <div class="countdown-label">Next check in</div>
+      <div class="countdown" id="countdown">5:00</div>
+    </div>
+  </div>
+
+  <div class="statusbar" id="statusbar">Ready — press Check Once or Start Checking.</div>
+
+  <!-- NEW -->
+  <div class="section">
+    <div class="section-label">New</div>
+    <div class="grid" id="cardsNew"></div>
+  </div>
+
+  <!-- REFURBISHED -->
+  <div class="section">
+    <div class="section-label">Certified Refurbished</div>
+    <div class="grid" id="cardsRefurb"></div>
+  </div>
+
+  <div class="alerts-box">
+    <div class="alerts-title">RESTOCK ALERTS</div>
+    <div id="alertsList"><div class="alert-empty">No restocks detected yet.</div></div>
+  </div>
+
+  <div class="footer">Data from store.steampowered.com · No login or API key needed</div>
+</div>
+
+<script>
+// New models use the main store package API
+// Refurb models use the same package IDs but we also scrape the refurb sale page
+const NEW_MODELS = [
+  { id: "new-oled-512", name: "Steam Deck OLED 512GB", packageId: "1202542", storage: "512GB", type: "OLED", condition: "new",
+    storeUrl: "https://store.steampowered.com/app/1675200/" },
+  { id: "new-oled-1tb", name: "Steam Deck OLED 1TB",   packageId: "1202547", storage: "1TB",   type: "OLED", condition: "new",
+    storeUrl: "https://store.steampowered.com/app/1675200/" },
+];
+
+const REFURB_MODELS = [
+  { id: "refurb-oled-512", name: "Steam Deck OLED 512GB", packageId: "1202542", storage: "512GB", type: "OLED", condition: "refurb",
+    storeUrl: "https://store.steampowered.com/sale/steamdeckrefurbished/" },
+  { id: "refurb-oled-1tb", name: "Steam Deck OLED 1TB",   packageId: "1202547", storage: "1TB",   type: "OLED", condition: "refurb",
+    storeUrl: "https://store.steampowered.com/sale/steamdeckrefurbished/" },
+  { id: "refurb-lcd-256",  name: "Steam Deck LCD 256GB",  packageId: "903906",  storage: "256GB",  type: "LCD",  condition: "refurb",
+    storeUrl: "https://store.steampowered.com/sale/steamdeckrefurbished/" },
+  { id: "refurb-lcd-512",  name: "Steam Deck LCD 512GB",  packageId: "903907",  storage: "512GB",  type: "LCD",  condition: "refurb",
+    storeUrl: "https://store.steampowered.com/sale/steamdeckrefurbished/" },
+];
+
+const ALL_MODELS = [...NEW_MODELS, ...REFURB_MODELS];
+
+function proxyUrls(packageId) {
+  const steam = `https://store.steampowered.com/api/packagedetails?packageids=${packageId}&cc=us&l=en`;
+  return [
+    `https://corsproxy.io/?url=${encodeURIComponent(steam)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(steam)}`,
+    `https://thingproxy.freeboard.io/fetch/${steam}`,
+    `https://cors.eu.org/${steam}`,
+    `https://proxy.cors.sh/${steam}`,
+  ];
+}
+
+// For refurb page, we scrape the sale page HTML to detect "AddToCart" buttons per package
+function refurbProxyUrls() {
+  const url = `https://store.steampowered.com/sale/steamdeckrefurbished/`;
+  return [
+    `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://thingproxy.freeboard.io/fetch/${url}`,
+  ];
+}
+
+const TIMEOUT_MS = 9000;
+
+async function fetchWithTimeout(url) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(t);
+    return res;
+  } catch(e) { clearTimeout(t); throw e; }
+}
+
+// Parse Steam package API response
+async function checkPackageApi(packageId) {
+  for (const url of proxyUrls(packageId)) {
+    try {
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) continue;
+      let json = await res.json().catch(() => null);
+      if (!json) continue;
+      if (json.contents) { try { json = JSON.parse(json.contents); } catch { continue; } }
+      const pkg = json[packageId];
+      if (!pkg?.success || !pkg.data) continue;
+      const data = pkg.data;
+      const released = data.release_date ? !data.release_date.coming_soon : true;
+      const hasPrice = !!data.price_overview;
+      return {
+        inStock: released && hasPrice,
+        price: hasPrice
+          ? (data.price_overview.final / 100).toLocaleString('en-US', { style: 'currency', currency: data.price_overview.currency || 'USD' })
+          : null
+      };
+    } catch { /* try next */ }
+  }
+  throw new Error('Package API failed');
+}
+
+// Scrape refurb page HTML and detect which packages have Add to Cart
+let refurbPageCache = null;
+let refurbPageTime = 0;
+
+async function fetchRefurbPage() {
+  // Cache for 60s to avoid hammering proxies
+  if (refurbPageCache && Date.now() - refurbPageTime < 60000) return refurbPageCache;
+  for (const url of refurbProxyUrls()) {
+    try {
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (text.length < 500) continue;
+      refurbPageCache = text;
+      refurbPageTime = Date.now();
+      return text;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+function refurbInStock(html, packageId) {
+  if (!html) return null;
+  // Look for a pattern like packageid=XXXXX near "AddToCart" or "btn_addtocart"
+  // Steam sale pages embed package IDs next to cart buttons
+  const regex = new RegExp(`packageid[^"]*${packageId}[^>]*>.*?AddToCart|AddToCart[^>]*>[^<]*<[^>]*packageid[^"]*${packageId}`, 'si');
+  if (regex.test(html)) return true;
+  // Simpler: check if the package ID appears alongside "addtocart" within 500 chars
+  const idx = html.indexOf(packageId);
+  if (idx === -1) return null;
+  const nearby = html.slice(Math.max(0, idx - 500), idx + 500).toLowerCase();
+  if (nearby.includes('addtocart') || nearby.includes('add_to_cart')) return true;
+  if (nearby.includes('out_of_stock') || nearby.includes('outofstock') || nearby.includes('sold_out')) return false;
+  return null; // can't determine
+}
+
+// State
+let stocks = ALL_MODELS.map(m => ({ ...m, inStock: null, price: null, lastChecked: null, checking: false, error: false }));
+let prevStock = {};
+let alerts = [];
+let running = false;
+let mainInterval = null;
+let countdownInterval = null;
+let secondsLeft = 300;
+let isChecking = false;
+
+async function checkAll() {
+  if (isChecking) return;
+  isChecking = true;
+  setStatus('⏳ Checking Steam Store…', '');
+  stocks = stocks.map(s => ({ ...s, checking: true, error: false }));
+  renderAll();
+  document.getElementById('checkOnceBtn').disabled = true;
+  document.getElementById('startStopBtn').disabled = true;
+
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+
+  // Fetch refurb page once for all refurb models
+  const refurbHtml = await fetchRefurbPage().catch(() => null);
+
+  let errorCount = 0;
+
+  await Promise.all(stocks.map(async (s, i) => {
+    try {
+      let inStock, price;
+      if (s.condition === 'refurb') {
+        // Try refurb page HTML first, fall back to package API
+        const fromPage = refurbInStock(refurbHtml, s.packageId);
+        if (fromPage !== null) {
+          inStock = fromPage;
+          price = null; // page scrape doesn't give price easily
+          // Still try API for price
+          try {
+            const apiResult = await checkPackageApi(s.packageId);
+            price = apiResult.price;
+            // Only override inStock from API if page was inconclusive
+          } catch {}
+        } else {
+          const apiResult = await checkPackageApi(s.packageId);
+          inStock = apiResult.inStock;
+          price = apiResult.price;
+        }
+      } else {
+        const apiResult = await checkPackageApi(s.packageId);
+        inStock = apiResult.inStock;
+        price = apiResult.price;
+      }
+
+      if (prevStock[s.id] === false && inStock === true) {
+        const label = s.condition === 'refurb' ? 'Refurb' : 'New';
+        const msg = `🎉 ${label}: ${s.name} is NOW IN STOCK!`;
+        alerts.unshift({ msg, time: new Date() });
+        if (alerts.length > 15) alerts.pop();
+        if (Notification.permission === 'granted') {
+          new Notification('Steam Deck In Stock!', { body: `${label}: ${s.name}` });
+        }
+      }
+      prevStock[s.id] = inStock;
+      stocks[i] = { ...s, inStock, price, lastChecked: new Date(), checking: false, error: false };
+    } catch {
+      errorCount++;
+      stocks[i] = { ...s, inStock: stocks[i].inStock, price: stocks[i].price, lastChecked: new Date(), checking: false, error: true };
+    }
+    renderAll();
+  }));
+
+  document.getElementById('checkOnceBtn').disabled = false;
+  document.getElementById('startStopBtn').disabled = false;
+
+  const inStockCount = stocks.filter(s => s.inStock).length;
+  if (errorCount === 0) {
+    setStatus(inStockCount ? `✅ ${inStockCount} model(s) in stock!` : '✅ All checked — nothing in stock right now.', inStockCount ? 'ok' : '');
+  } else if (errorCount < stocks.length) {
+    setStatus(`⚠ ${errorCount} model(s) had errors (proxy issue) — others updated.`, 'err');
+  } else {
+    setStatus('❌ All requests failed. Check your internet and try again.', 'err');
+  }
+  isChecking = false;
+}
+
+function toggleRunning() { running ? stopChecker() : startChecker(); }
+
+function startChecker() {
+  running = true;
+  document.getElementById('startStopBtn').textContent = '⏹ Stop';
+  document.getElementById('startStopBtn').className = 'btn btn-stop';
+  document.getElementById('checkOnceBtn').style.display = 'none';
+  document.getElementById('countdownWrap').style.display = 'block';
+  secondsLeft = 300; updateCountdown();
+  checkAll();
+  mainInterval      = setInterval(() => { checkAll(); secondsLeft = 300; }, 300_000);
+  countdownInterval = setInterval(() => { secondsLeft = Math.max(0, secondsLeft - 1); updateCountdown(); }, 1000);
+}
+
+function stopChecker() {
+  running = false;
+  clearInterval(mainInterval); clearInterval(countdownInterval);
+  document.getElementById('startStopBtn').textContent = '▶ Start Checking';
+  document.getElementById('startStopBtn').className = 'btn btn-start';
+  document.getElementById('checkOnceBtn').style.display = '';
+  document.getElementById('countdownWrap').style.display = 'none';
+  setStatus('Stopped.', '');
+}
+
+function updateCountdown() {
+  const m = Math.floor(secondsLeft / 60), s = secondsLeft % 60;
+  document.getElementById('countdown').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('statusbar');
+  el.textContent = msg;
+  el.className = 'statusbar' + (cls ? ' ' + cls : '');
+}
+
+function cardHtml(s) {
+  const isIn  = s.inStock === true;
+  const isOut = s.inStock === false;
+  const cls   = 'card' + (isIn ? ' in-stock' : isOut ? ' out-stock' : '');
+  const condTag = s.condition === 'refurb'
+    ? `<span class="tag refurb">Refurb</span>`
+    : `<span class="tag new">New</span>`;
+  const typeTag = `<span class="tag ${s.type.toLowerCase()}">${s.type}</span>`;
+
+  let statusHtml;
+  if (s.checking)   statusHtml = `<div class="card-status status-unk">⏳…</div>`;
+  else if (s.error) statusHtml = `<div class="card-status status-err">⚠ Error</div>`;
+  else if (isIn)    statusHtml = `<div class="card-status status-in">✅ IN STOCK</div>`;
+  else if (isOut)   statusHtml = `<div class="card-status status-out">❌ Out of Stock</div>`;
+  else              statusHtml = `<div class="card-status status-unk">— Not checked</div>`;
+
+  const priceHtml = (isIn && s.price) ? `<div class="card-price">${s.price}</div>` : '';
+  const timeHtml  = s.lastChecked
+    ? `<div class="card-time">Checked: ${s.lastChecked.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</div>`
+    : '';
+
+  return `<div class="${cls}">
+    <div class="card-top">
+      <div class="card-left">
+        <div class="tags">${typeTag}${condTag}</div>
+        <div class="card-storage">${s.storage}</div>
+      </div>
+      <div>${statusHtml}${priceHtml}</div>
+    </div>
+    ${timeHtml}
+  </div>`;
+}
+
+function renderAll() {
+  document.getElementById('cardsNew').innerHTML =
+    stocks.filter(s => s.condition === 'new').map(cardHtml).join('');
+  document.getElementById('cardsRefurb').innerHTML =
+    stocks.filter(s => s.condition === 'refurb').map(cardHtml).join('');
+
+  document.getElementById('globalBadge').style.display =
+    stocks.some(s => s.inStock === true) ? 'block' : 'none';
+
+  document.getElementById('alertsList').innerHTML = alerts.length === 0
+    ? '<div class="alert-empty">No restocks detected yet.</div>'
+    : alerts.map(a =>
+        `<div class="alert-row">
+          <span>${a.msg}</span>
+          <span class="alert-time">${a.time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+        </div>`
+      ).join('');
+}
+
+renderAll();
+</script>
+</body>
+</html>
